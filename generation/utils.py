@@ -1888,7 +1888,7 @@ class GenerationMixin:
         streamer: Optional["BaseStreamer"] = None,
         negative_prompt_ids: Optional[torch.Tensor] = None,
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
-        dsgi_sample = False,
+        dsgi_manager = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         r"""
@@ -2221,7 +2221,7 @@ class GenerationMixin:
             )
 
             # 12. run sample (it degenerates to greedy search when `generation_config.do_sample=False`)
-            if dsgi_sample:
+            if dsgi_manager is not None:
                 result = self._dsgi_sample(
                     input_ids,
                     logits_processor=prepared_logits_processor,
@@ -2229,6 +2229,7 @@ class GenerationMixin:
                     generation_config=generation_config,
                     synced_gpus=synced_gpus,
                     streamer=streamer,
+                    dsgi_manager=dsgi_manager,
                     **model_kwargs,
                 )
             else:
@@ -3133,6 +3134,7 @@ class GenerationMixin:
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
+        dsgi_manager,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         r"""
@@ -3209,10 +3211,19 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
+        previous_executable_partial_program_code = None
         while self._has_unfinished_sequences(
             this_peer_finished, synced_gpus, device=input_ids.device, cur_len=cur_len, max_length=max_length
         ):
-            # prepare model inputs
+            dynamic_signals_input_ids, executable_partial_program_code, new_text = dsgi_manager.to_dynamic_signal_input_ids(input_ids.clone())
+            print(new_text)
+            print()
+            if previous_executable_partial_program_code != executable_partial_program_code:
+                print(f"Total Dynamic Signals: {len(dynamic_signals_input_ids)}")
+                # print(executable_partial_program_code)
+                print()
+                previous_executable_partial_program_code = executable_partial_program_code
+
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
             # prepare variable output controls (note: some models won't accept all output controls)
@@ -3238,7 +3249,6 @@ class GenerationMixin:
             # (the clone itself is always small)
             next_token_logits = outputs.logits[:, -1, :].clone().float()
             next_token_logits = next_token_logits.to(input_ids.device)
-            import ipdb; ipdb.set_trace()
 
             # pre-process distribution
             next_token_scores = logits_processor(input_ids, next_token_logits)
@@ -3263,13 +3273,47 @@ class GenerationMixin:
                         else (outputs.hidden_states,)
                     )
 
+            original_input_ids_next_token_scores = next_token_scores
+            original_input_ids_probs = nn.functional.softmax(original_input_ids_next_token_scores, dim=-1)
+            original_input_ids_next_tokens = torch.argmax(original_input_ids_probs, dim=-1)
+
+            dynamic_signals_output_probs = {}
+            dynamic_signals_output_next_token = {}
+            for test_case, dynamic_input_ids in dynamic_signals_input_ids.items():
+                try:
+                    model_dynamic_inputs = self.prepare_inputs_for_generation(dynamic_input_ids)
+                    if is_prefill:
+                        outputs = self(**model_dynamic_inputs, return_dict=True)
+                    else:
+                        outputs = model_forward(**model_dynamic_inputs, return_dict=True)
+                    next_token_logits = outputs.logits[:, -1, :].clone().float()
+                    next_token_logits = next_token_logits.to(input_ids.device)
+                    next_token_scores = logits_processor(input_ids, next_token_logits)
+                    probs = nn.functional.softmax(next_token_scores, dim=-1)
+                    dynamic_signals_output_probs[test_case] = probs
+                    dynamic_signals_output_next_token[test_case] = torch.argmax(probs, dim=-1)
+                except torch.OutOfMemoryError:
+                    print(f"Memory Error on forward pass: {dynamic_input_ids.shape}")
+                    continue
+                except:
+                    print("Unknown Error")
+                    continue
+                # print(f"Dynamic Signals NT: {set([dsgi_manager.tokenizer.decode(v[0]) for v in dynamic_signals_output_next_token.values()])}")
+                # print(f"Orignal         NT: {set([dsgi_manager.tokenizer.decode(original_input_ids_next_tokens[0])])}")
+                # print()
+
+            # Apply Dynamic Signals Guidance
+            probs_guided = dsgi_manager.apply_guidance_from_probs(original_input_ids_probs, list(dynamic_signals_output_probs.values()))
+            dsgi_manager.print_top_k_token_probs(original_input_ids_probs, probs_guided, k=3)
+            probs = probs_guided
+            # probs = original_input_ids_probs
+
             # token selection
             if do_sample:
-                probs = nn.functional.softmax(next_token_scores, dim=-1)
                 # TODO (joao): this OP throws "skipping cudagraphs due to ['incompatible ops']", find solution
                 next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
             else:
-                next_tokens = torch.argmax(next_token_scores, dim=-1)
+                next_tokens = torch.argmax(probs, dim=-1)
 
             # finished sentences should have their next token be a padding token
             if has_eos_stopping_criteria:
