@@ -3135,6 +3135,7 @@ class GenerationMixin:
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
         dsgi_manager,
+        debug=True,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         r"""
@@ -3211,18 +3212,23 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
-        previous_executable_partial_program_code = None
+        if debug:
+            previous_executable_partial_program_code = None
+
         while self._has_unfinished_sequences(
             this_peer_finished, synced_gpus, device=input_ids.device, cur_len=cur_len, max_length=max_length
         ):
-            dynamic_signals_input_ids, executable_partial_program_code, new_text = dsgi_manager.to_dynamic_signal_input_ids(input_ids.clone())
-            print(new_text)
-            print()
-            if previous_executable_partial_program_code != executable_partial_program_code:
-                print(f"Total Dynamic Signals: {len(dynamic_signals_input_ids)}")
-                # print(executable_partial_program_code)
+            #### Extract Dynamic Signal  #### 
+            dynamic_signal_input_ids, debug_data = dsgi_manager.extract_dynamic_signal_input_ids(input_ids.clone())
+            if debug:
+                executable_partial_program_code, new_code = debug_data 
+                print(new_code)
                 print()
-                previous_executable_partial_program_code = executable_partial_program_code
+                if previous_executable_partial_program_code != executable_partial_program_code:
+                    print(f"Total Dynamic Signals: {len(dynamic_signal_input_ids)}")
+                    print()
+                    previous_executable_partial_program_code = executable_partial_program_code
+            ###########
 
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
@@ -3273,40 +3279,29 @@ class GenerationMixin:
                         else (outputs.hidden_states,)
                     )
 
-            original_input_ids_next_token_scores = next_token_scores
-            original_input_ids_probs = nn.functional.softmax(original_input_ids_next_token_scores, dim=-1)
-            original_input_ids_next_tokens = torch.argmax(original_input_ids_probs, dim=-1)
+            original_probs = nn.functional.softmax(next_token_scores, dim=-1)
 
-            dynamic_signals_output_probs = {}
-            dynamic_signals_output_next_token = {}
-            for test_case, dynamic_input_ids in dynamic_signals_input_ids.items():
-                try:
-                    model_dynamic_inputs = self.prepare_inputs_for_generation(dynamic_input_ids)
-                    if is_prefill:
-                        outputs = self(**model_dynamic_inputs, return_dict=True)
-                    else:
-                        outputs = model_forward(**model_dynamic_inputs, return_dict=True)
-                    next_token_logits = outputs.logits[:, -1, :].clone().float()
-                    next_token_logits = next_token_logits.to(input_ids.device)
-                    next_token_scores = logits_processor(input_ids, next_token_logits)
-                    probs = nn.functional.softmax(next_token_scores, dim=-1)
-                    dynamic_signals_output_probs[test_case] = probs
-                    dynamic_signals_output_next_token[test_case] = torch.argmax(probs, dim=-1)
-                except torch.OutOfMemoryError:
-                    print(f"Memory Error on forward pass: {dynamic_input_ids.shape}")
-                    continue
-                except:
-                    print("Unknown Error")
-                    continue
-                # print(f"Dynamic Signals NT: {set([dsgi_manager.tokenizer.decode(v[0]) for v in dynamic_signals_output_next_token.values()])}")
-                # print(f"Orignal         NT: {set([dsgi_manager.tokenizer.decode(original_input_ids_next_tokens[0])])}")
-                # print()
+            #### Calculate Dynamic Signal conditional distibution  #### 
+            device = input_ids.device
+            model_dynamic_inputs = self.prepare_inputs_for_generation(dynamic_signal_input_ids)
+            if is_prefill:
+                dyn_outputs = self(**model_dynamic_inputs, return_dict=True)
+            else:
+                dyn_outputs = model_forward(**model_dynamic_inputs, return_dict=True)
+            dyn_next_token_logits = dyn_outputs.logits[:, -1, :].clone().float()
+            dyn_next_token_logits = dyn_next_token_logits.to(device)
+            dyn_next_token_scores = logits_processor(dynamic_signal_input_ids, dyn_next_token_logits)
+            dyn_probs = nn.functional.softmax(dyn_next_token_scores, dim=-1)
+            #########################
 
-            # Apply Dynamic Signals Guidance
-            probs_guided = dsgi_manager.apply_guidance_from_probs(original_input_ids_probs, list(dynamic_signals_output_probs.values()))
-            dsgi_manager.print_top_k_token_probs(original_input_ids_probs, probs_guided, k=3)
+            #### Apply Dynamic Signal Guidance #### 
+            probs_guided = dsgi_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
+            #########################
+
+            #### Inject Guidance #### 
             probs = probs_guided
-            # probs = original_input_ids_probs
+            # probs = original_probs
+            #########################
 
             # token selection
             if do_sample:
