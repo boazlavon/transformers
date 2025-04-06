@@ -3219,15 +3219,19 @@ class GenerationMixin:
             this_peer_finished, synced_gpus, device=input_ids.device, cur_len=cur_len, max_length=max_length
         ):
             #### Extract Dynamic Signal  #### 
-            dynamic_signal_input_ids, debug_data = dsgi_manager.extract_dynamic_signal_input_ids(input_ids.clone())
-            if debug:
-                executable_partial_program_code, new_code = debug_data 
-                print(new_code)
-                print()
-                if previous_executable_partial_program_code != executable_partial_program_code:
-                    print(f"Total Dynamic Signals: {len(dynamic_signal_input_ids)}")
-                    print()
-                    previous_executable_partial_program_code = executable_partial_program_code
+            is_dsgi_enabled = (dsgi_manager is not None) and (dsgi_manager.is_dsgi_enabled(input_ids.clone()))
+            if is_dsgi_enabled:
+                dynamic_signal_input_ids, debug_data = dsgi_manager.extract_dynamic_signal_input_ids(input_ids.clone())
+                # no dynamic signals were extracted, no need for guidance
+                if torch.equal(dynamic_signal_input_ids,input_ids):
+                    is_dsgi_enabled = False
+                if debug:
+                    executable_partial_program_code, new_code = debug_data
+                    if new_code:
+                        print(new_code)
+                        print()
+                    if previous_executable_partial_program_code != executable_partial_program_code:
+                        previous_executable_partial_program_code = executable_partial_program_code
             ###########
 
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
@@ -3281,26 +3285,23 @@ class GenerationMixin:
 
             original_probs = nn.functional.softmax(next_token_scores, dim=-1)
 
-            #### Calculate Dynamic Signal conditional distibution  #### 
-            device = input_ids.device
-            model_dynamic_inputs = self.prepare_inputs_for_generation(dynamic_signal_input_ids)
-            if is_prefill:
-                dyn_outputs = self(**model_dynamic_inputs, return_dict=True)
-            else:
-                dyn_outputs = model_forward(**model_dynamic_inputs, return_dict=True)
-            dyn_next_token_logits = dyn_outputs.logits[:, -1, :].clone().float()
-            dyn_next_token_logits = dyn_next_token_logits.to(device)
-            dyn_next_token_scores = logits_processor(dynamic_signal_input_ids, dyn_next_token_logits)
-            dyn_probs = nn.functional.softmax(dyn_next_token_scores, dim=-1)
-            #########################
+            probs = original_probs
+            if is_dsgi_enabled:
+                #### Calculate Dynamic Signal conditional distibution ####
+                device = input_ids.device
+                model_dynamic_inputs = self.prepare_inputs_for_generation(dynamic_signal_input_ids)
+                if is_prefill:
+                    dyn_outputs = self(**model_dynamic_inputs, return_dict=True)
+                else:
+                    dyn_outputs = model_forward(**model_dynamic_inputs, return_dict=True)
+                dyn_next_token_logits = dyn_outputs.logits[:, -1, :].clone().float()
+                dyn_next_token_logits = dyn_next_token_logits.to(device)
+                dyn_next_token_scores = logits_processor(dynamic_signal_input_ids, dyn_next_token_logits)
+                dyn_probs = nn.functional.softmax(dyn_next_token_scores, dim=-1)
 
-            #### Apply Dynamic Signal Guidance #### 
-            probs_guided = dsgi_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
-            #########################
-
-            #### Inject Guidance #### 
-            probs = probs_guided
-            # probs = original_probs
+                #### Apply Dynamic Signal Guidance ####
+                probs_guided = dsgi_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
+                probs = probs_guided
             #########################
 
             # token selection
