@@ -1888,7 +1888,7 @@ class GenerationMixin:
         streamer: Optional["BaseStreamer"] = None,
         negative_prompt_ids: Optional[torch.Tensor] = None,
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
-        dsgi_manager = None,
+        dsgi_injection_manager = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         r"""
@@ -2221,7 +2221,7 @@ class GenerationMixin:
             )
 
             # 12. run sample (it degenerates to greedy search when `generation_config.do_sample=False`)
-            if dsgi_manager is not None:
+            if dsgi_injection_manager is not None:
                 result = self._dsgi_sample(
                     input_ids,
                     logits_processor=prepared_logits_processor,
@@ -2229,7 +2229,7 @@ class GenerationMixin:
                     generation_config=generation_config,
                     synced_gpus=synced_gpus,
                     streamer=streamer,
-                    dsgi_manager=dsgi_manager,
+                    dsgi_injection_manager=dsgi_injection_manager,
                     **model_kwargs,
                 )
             else:
@@ -3134,7 +3134,7 @@ class GenerationMixin:
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
-        dsgi_manager,
+        dsgi_injection_manager,
         debug=True,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
@@ -3219,9 +3219,9 @@ class GenerationMixin:
             this_peer_finished, synced_gpus, device=input_ids.device, cur_len=cur_len, max_length=max_length
         ):
             #### Extract Dynamic Signal  #### 
-            is_dsgi_enabled = (dsgi_manager is not None) and (dsgi_manager.is_dsgi_enabled(input_ids.clone()))
+            is_dsgi_enabled = (dsgi_injection_manager is not None) and (dsgi_injection_manager.is_dsgi_enabled(input_ids.clone()))
             if is_dsgi_enabled:
-                dynamic_signal_input_ids, debug_data = dsgi_manager.extract_dynamic_signal_input_ids(input_ids.clone())
+                dynamic_signal_input_ids, debug_data = dsgi_injection_manager.extract_dynamic_signal_input_ids(input_ids.clone())
                 # no dynamic signals were extracted, no need for guidance
                 if torch.equal(dynamic_signal_input_ids,input_ids):
                     is_dsgi_enabled = False
@@ -3300,7 +3300,7 @@ class GenerationMixin:
                 dyn_probs = nn.functional.softmax(dyn_next_token_scores, dim=-1)
 
                 #### Apply Dynamic Signal Guidance ####
-                probs_guided = dsgi_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
+                probs_guided = dsgi_injection_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
                 probs = probs_guided
             #########################
 
