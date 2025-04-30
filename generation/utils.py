@@ -3135,7 +3135,7 @@ class GenerationMixin:
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
         dsgi_injection_manager,
-        debug=True,
+        debug=False,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         r"""
@@ -3298,6 +3298,11 @@ class GenerationMixin:
                 dyn_next_token_logits = dyn_next_token_logits.to(device)
                 dyn_next_token_scores = logits_processor(dynamic_signal_input_ids, dyn_next_token_logits)
                 dyn_probs = nn.functional.softmax(dyn_next_token_scores, dim=-1)
+
+                #### Apply Top Probs ####
+                if dsgi_injection_manager.is_top_probs_enabled():
+                    original_probs = dsgi_injection_manager.mask_top_probs(original_probs)
+                    dyn_probs = dsgi_injection_manager.mask_top_probs(dyn_probs)
 
                 #### Apply Dynamic Signal Guidance ####
                 probs_guided = dsgi_injection_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
