@@ -3212,6 +3212,7 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
+        debug = (dsgi_injection_manager is not None) and dsgi_injection_manager.debug_mode
         if debug:
             previous_executable_partial_program_code = None
 
@@ -3305,7 +3306,7 @@ class GenerationMixin:
                     dyn_probs = dsgi_injection_manager.mask_top_probs(dyn_probs)
 
                 #### Apply Dynamic Signal Guidance ####
-                probs_guided = dsgi_injection_manager.apply_guidance(original_probs, dyn_probs, debug=debug)
+                probs_guided = dsgi_injection_manager.apply_guidance(original_probs, dyn_probs, debug=False)
                 probs = probs_guided
             #########################
 
