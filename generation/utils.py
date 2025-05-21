@@ -1888,7 +1888,7 @@ class GenerationMixin:
         streamer: Optional["BaseStreamer"] = None,
         negative_prompt_ids: Optional[torch.Tensor] = None,
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
-        dsgi_injection_manager = None,
+        eg_cfg_injection_manager = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         r"""
@@ -2221,15 +2221,15 @@ class GenerationMixin:
             )
 
             # 12. run sample (it degenerates to greedy search when `generation_config.do_sample=False`)
-            if dsgi_injection_manager is not None:
-                result = self._dsgi_sample(
+            if eg_cfg_injection_manager is not None:
+                result = self._eg_cfg_sample(
                     input_ids,
                     logits_processor=prepared_logits_processor,
                     stopping_criteria=prepared_stopping_criteria,
                     generation_config=generation_config,
                     synced_gpus=synced_gpus,
                     streamer=streamer,
-                    dsgi_injection_manager=dsgi_injection_manager,
+                    eg_cfg_injection_manager=eg_cfg_injection_manager,
                     **model_kwargs,
                 )
             else:
@@ -3126,7 +3126,7 @@ class GenerationMixin:
         else:
             return input_ids
 
-    def _dsgi_sample(
+    def _eg_cfg_sample(
         self,
         input_ids: torch.LongTensor,
         logits_processor: LogitsProcessorList,
@@ -3134,7 +3134,7 @@ class GenerationMixin:
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
-        dsgi_injection_manager,
+        eg_cfg_injection_manager,
         debug=False,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
@@ -3212,7 +3212,7 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
-        debug = (dsgi_injection_manager is not None) and dsgi_injection_manager.debug_mode
+        debug = (eg_cfg_injection_manager is not None) and eg_cfg_injection_manager.debug_mode
         if debug:
             previous_executable_partial_program_code = None
 
@@ -3220,12 +3220,12 @@ class GenerationMixin:
             this_peer_finished, synced_gpus, device=input_ids.device, cur_len=cur_len, max_length=max_length
         ):
             #### Extract Dynamic Signal  #### 
-            is_dsgi_enabled = (dsgi_injection_manager is not None) and (dsgi_injection_manager.is_dsgi_enabled(input_ids.clone()))
-            if is_dsgi_enabled:
-                dynamic_signal_input_ids, debug_data = dsgi_injection_manager.extract_dynamic_signal_input_ids(input_ids.clone())
+            is_eg_cfg_enabled = (eg_cfg_injection_manager is not None) and (eg_cfg_injection_manager.is_eg_cfg_enabled(input_ids.clone()))
+            if is_eg_cfg_enabled:
+                dynamic_signal_input_ids, debug_data = eg_cfg_injection_manager.extract_dynamic_signal_input_ids(input_ids.clone())
                 # no dynamic signals were extracted, no need for guidance
                 if torch.equal(dynamic_signal_input_ids,input_ids):
-                    is_dsgi_enabled = False
+                    is_eg_cfg_enabled = False
                 if debug:
                     executable_partial_program_code, new_code = debug_data
                     if new_code:
@@ -3287,7 +3287,7 @@ class GenerationMixin:
             original_probs = nn.functional.softmax(next_token_scores, dim=-1)
 
             probs = original_probs
-            if is_dsgi_enabled:
+            if is_eg_cfg_enabled:
                 #### Calculate Dynamic Signal conditional distibution ####
                 device = input_ids.device
                 model_dynamic_inputs = self.prepare_inputs_for_generation(dynamic_signal_input_ids)
@@ -3301,12 +3301,12 @@ class GenerationMixin:
                 dyn_probs = nn.functional.softmax(dyn_next_token_scores, dim=-1)
 
                 #### Apply Top Probs ####
-                if dsgi_injection_manager.is_top_probs_enabled():
-                    original_probs = dsgi_injection_manager.mask_top_probs(original_probs)
-                    dyn_probs = dsgi_injection_manager.mask_top_probs(dyn_probs)
+                if eg_cfg_injection_manager.is_top_probs_enabled():
+                    original_probs = eg_cfg_injection_manager.mask_top_probs(original_probs)
+                    dyn_probs = eg_cfg_injection_manager.mask_top_probs(dyn_probs)
 
                 #### Apply Dynamic Signal Guidance ####
-                probs_guided = dsgi_injection_manager.apply_guidance(original_probs, dyn_probs, debug=False)
+                probs_guided = eg_cfg_injection_manager.apply_guidance(original_probs, dyn_probs, debug=False)
                 probs = probs_guided
             #########################
 
