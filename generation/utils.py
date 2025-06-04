@@ -2221,6 +2221,10 @@ class GenerationMixin:
             )
 
             # 12. run sample (it degenerates to greedy search when `generation_config.do_sample=False`)
+            # --- EG-CFG Modification ---
+            # This block was added by the EG-CFG Research Team, Tel Aviv University.
+            # © 2025. Licensed under CC BY-NC-SA 4.0.
+            # For commercial use, contact yair.eran@ramot.org
             if eg_cfg_injection_manager is not None:
                 result = self._eg_cfg_sample(
                     input_ids,
@@ -3219,6 +3223,10 @@ class GenerationMixin:
         while self._has_unfinished_sequences(
             this_peer_finished, synced_gpus, device=input_ids.device, cur_len=cur_len, max_length=max_length
         ):
+            # --- EG-CFG Modification START ---
+            # This block was added by the EG-CFG Research Team, Tel Aviv University.
+            # © 2025. Licensed under CC BY-NC-SA 4.0.
+            # For commercial use, contact yair.eran@ramot.org
             #### Extract Dynamic Signal  #### 
             is_eg_cfg_enabled = (eg_cfg_injection_manager is not None) and (eg_cfg_injection_manager.is_eg_cfg_enabled(input_ids.clone()))
             if is_eg_cfg_enabled:
@@ -3234,6 +3242,7 @@ class GenerationMixin:
                     if previous_executable_partial_program_code != executable_partial_program_code:
                         previous_executable_partial_program_code = executable_partial_program_code
             ###########
+            # --- EG-CFG Modification END ---
 
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
@@ -3287,6 +3296,10 @@ class GenerationMixin:
             original_probs = nn.functional.softmax(next_token_scores, dim=-1)
 
             probs = original_probs
+            # --- EG-CFG Modification START ---
+            # This block was added by the EG-CFG Research Team, Tel Aviv University.
+            # © 2025. Licensed under CC BY-NC-SA 4.0.
+            # For commercial use, contact yair.eran@ramot.org
             if is_eg_cfg_enabled:
                 #### Calculate Dynamic Signal conditional distibution ####
                 device = input_ids.device
@@ -3309,6 +3322,7 @@ class GenerationMixin:
                 probs_guided = eg_cfg_injection_manager.apply_guidance(original_probs, dyn_probs, debug=False)
                 probs = probs_guided
             #########################
+            # --- EG-CFG Modification END ---
 
             # token selection
             if do_sample:

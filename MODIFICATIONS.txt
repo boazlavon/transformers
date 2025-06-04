@@ -1,0 +1,29 @@
+Modifications to HuggingFace Transformers
+-----------------------------------------
+
+This directory contains custom modifications made by the EG-CFG Research Team
+at Tel Aviv University as part of the EG-CFG project:
+Execution-Guided Classifier-Free Guidance for Code Generation.
+
+Our changes extend the internal decoding loop in
+`transformers/generation/utils.py` to support execution-aware generation.
+Specifically, the modifications enable token-level integration of runtime
+feedback during inference, allowing the model to dynamically condition on
+execution traces.
+
+All changes are clearly marked in the source code using the following comment block:
+
+    # --- EG-CFG Modification ---
+    # This block was added by the EG-CFG Research Team, Tel Aviv University.
+    # © 2025. Licensed under CC BY-NC-SA 4.0.
+    # For commercial use, contact yair.eran@ramot.org
+
+These modifications are licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).  
+All original Hugging Face code remains under the Apache License 2.0.
+
+Original upstream repository:
+- https://github.com/huggingface/transformers
+
+Modifications © 2025 EG-CFG Research Team, Tel Aviv University  
+License: CC BY-NC-SA 4.0 (modifications only)  
+For commercial licensing inquiries, contact: yair.eran@ramot.org
