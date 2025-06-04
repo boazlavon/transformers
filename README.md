@@ -7,7 +7,7 @@ Specifically, our modifications in `transformers/generation/utils.py` enable tok
 > The original code remains under Apache 2.0.  
 >
 > 🔒 **Only the modifications introduced by the EG-CFG Research Team are licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)**.  
-> These changes are clearly marked in the code using `# --- EG-CFG Modification ---` comment blocks.  
+> These changes are clearly marked in the source code using `# --- EG-CFG Modification START ---` and `# --- EG-CFG Modification END ---` comment blocks.  
 > For commercial use of these modifications, please contact [yair.eran@ramot.org](mailto:yair.eran@ramot.org).  
 >
 > Full source: [github.com/boazlavon/eg_cfg](https://github.com/boazlavon/eg_cfg/tree/master)
