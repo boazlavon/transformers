@@ -1,0 +1,21 @@
+LICENSE NOTICE FOR MODIFIED TRANSFORMERS CODE
+---------------------------------------------
+
+This project includes files derived from the Hugging Face Transformers library,
+which is licensed under the Apache License 2.0.
+
+All such original files and unchanged portions remain under the terms of the
+Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+In accordance with Section 4 of that license, we have introduced modifications
+to support execution-aware decoding. These modifications are:
+
+- Clearly marked in the code using `# --- EG-CFG Modification ---` comment blocks
+- Authored by the EG-CFG Research Team at Tel Aviv University
+- Licensed separately under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)
+
+For commercial use of these modifications, please contact:
+yair.eran@ramot.org
+
+No part of the original Apache-licensed code has been relicensed or restricted.
